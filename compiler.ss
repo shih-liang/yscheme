@@ -3686,10 +3686,90 @@
 ;  generate-x86-64  ;; turn it on only on 64-bit machines
 ))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;  my code
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(load "tests.ss")
-(tracer #f)
-(test-all)
+;; pass: sexp -> sexp
+;; $combine-iter: list -> pass
+(define $combine-iter
+  (lambda (passes)
+    (lambda (sexp)
+      (define $combine-iter-helper
+	(lambda (current sexp passes)
+	  (cond
+	   ((null? current)
+	    ($combine-iter-helper passes sexp passes))
+	   ((symbol? (car current))
+	    ($combine-iter-helper (cdr current) ((eval (car current)) sexp) passes))
+	   (#t
+	    (if ((eval (caddr (car current))) sexp)
+		sexp
+		($combine-iter-helper (cdr current) sexp passes))))))
+      ($combine-iter-helper passes sexp passes))))
+
+;; pass: sexp -> sexp
+;; pass-compiler: pass x pass -> pass
+(define pass-combinator
+  (lambda (compiler pass)
+    (lambda (sexp)
+      (pass (compiler sexp)))))
+
+(define compiler-generator
+  (lambda (passes compiler)
+    (if (null? passes)
+	compiler
+	(let ((pass (if (symbol? (car passes))
+			(eval (car passes))
+			($combine-iter (cdar passes)))))
+	  (compiler-generator (cdr passes) (pass-combinator compiler pass))))))
+
+(define compiler
+  (compiler-generator 
+   '(convert-complex-datum
+     uncover-assigned
+     purify-letrec
+     pre-optimize
+     convert-assignments
+     optimize-direct-call
+     remove-anonymous-lambda
+     sanitize-binding-forms
+					;  uncover-free
+     convert-closures
+     analyze-closure-size ;;;
+					;  optimize-known-call
+     introduce-procedure-primitives
+     lift-letrec
+     normalize-context
+     specify-representation
+     uncover-locals
+     remove-let
+     verify-uil
+     remove-complex-opera*
+     impose-calling-conventions
+     uncover-frame-conflict
+     pre-assign-frame
+     assign-new-frame
+     (iterate
+      finalize-frame-locations
+      select-instructions
+      uncover-register-conflict
+      assign-registers
+      (break when everybody-home?)
+      assign-frame)
+     finalize-locations
+     expose-frame-var
+     expose-basic-blocks
+     optimize-jumps
+     flatten-program
+     analyze-code-size ;;;
+;     generate-x86-64  ;; turn it on only on 64-bit machines
+     ) 
+   parse-scheme))
+
+;;(load "tests.ss")
+;;(tracer #f)
+;;(test-all)
 
 ;; (test-all-analyze)
 ;; (test-one (nth 107 tests))
