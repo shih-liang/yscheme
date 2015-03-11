@@ -3683,7 +3683,7 @@
   optimize-jumps
   flatten-program
   analyze-code-size ;;;
-;  generate-x86-64  ;; turn it on only on 64-bit machines
+  generate-x86-64  ;; turn it on only on 64-bit machines
 ))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -3762,8 +3762,8 @@
      expose-basic-blocks
      optimize-jumps
      flatten-program
-     analyze-code-size ;;;
-;     generate-x86-64  ;; turn it on only on 64-bit machines
+     analyze-code-size
+     generate-x86-64  ;; turn it on only on 64-bit machines
      ) 
    parse-scheme))
 
