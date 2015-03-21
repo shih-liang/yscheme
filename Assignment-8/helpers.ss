@@ -456,7 +456,7 @@
           (do ([i next (fx+ i 1)])
               ((fx>= i n))
             (let ([fvi (string->symbol (format "fv~s" i))])
-              (eval `(define-syntax ,fvi
+              (eval `(define ,fvi
                        (cons 'macro!
                          (lambda (x)
                            (syntax-case x ()

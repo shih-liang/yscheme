@@ -1,4 +1,4 @@
-(load "match.ss")
+(load "../match.ss")
 (optimize-level 2)
 (define int32?
   (lambda (x)
