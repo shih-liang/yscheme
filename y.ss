@@ -1,3 +1,66 @@
+(define finalize-locations
+  (lambda (x)
+    (define Program
+      (lambda (x)
+	(define map-label-to-def
+	  (lambda (label* body*)
+	    (map (lambda (label body)
+		   `(,label (lambda () ,(Body body))))
+		 label* body*)))
+	(match x
+	       [(letrec ([,label* (lambda () ,body*)] ...) ,body)
+		`(letrec ,(map-label-to-def label* body*) ,(Body body))])))
+    (define Body
+      (lambda (x)
+	(match x
+	       [(locate ([,uvar* ,loc*] ...) ,tail)
+		(Tail tail (map cons uvar* loc*))])))
+    (define Tail
+      (lambda (x env)
+	(match x
+	       [(begin ,effts* ... ,tail)
+		`(begin ,@(map (lambda (e) (Effect e env)) effts*) ,(Tail tail env))]
+	       [(if ,pred ,then ,else)
+		`(if ,(Pred pred env) ,(Tail then env) ,(Tail else env))]
+	       [(,triv)
+		(list (Triv triv env))])))
+    (define Pred
+      (lambda (x env)
+	(match x
+	       [(if ,pred1 ,pred2 ,pred3)
+		`(if ,(Pred pred1 env) ,(Pred pred2 env) ,(Pred pred3 env))]
+	       [(begin ,effect* ... ,pred)
+		`(begin ,@(map (lambda (e) (Effect e env)) effect*) ,(Pred pred env))]
+	       [(,relop ,triv1 ,triv2)
+		`(,relop ,(Triv triv1 env) ,(Triv triv2 env))]
+	       [(true) '(true)]
+	       [(false) '(false)])))
+    (define Effect
+      (lambda (x env)
+	(match x
+	       [(if ,pred ,efft1 ,efft2)
+		`(if ,(Pred pred env) ,(Effect efft1 env) ,(Effect efft2 env))]
+	       [(begin ,effect* ... ,effect)
+		`(begin ,@(map (lambda (e) (Effect e env)) effect*) ,(Effect effect env))]
+	       [(set! ,var (,binop ,triv1 ,triv2))
+		`(set! ,(Var var env) (,binop ,(Triv triv1 env) ,(Triv triv2 env)))]
+	       [(set! ,var ,triv)
+		`(set! ,(Var var env) ,(Triv triv env))]
+	       [(nop) '(nop)])))
+    (define Loc (lambda (x) x))
+    (define Var
+      (lambda (x env)
+	(let ((find (assoc x env)))
+	  (if find
+	      (cdr find)
+	      x))))
+    (define Triv
+      (lambda (x env)
+	(if (or (integer? x) (label? x))
+	    x
+	    (Var x env))))
+    (Program x)))
+
 (define expose-frame-var
   (lambda (x)
     (define Program
