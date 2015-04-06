@@ -79,16 +79,34 @@
 	(match x
 	       [(begin ,effts* ... ,tail-p)
 		`(begin ,@(map Effect effts*) ,(Tail tail-p))]
+	       [(if ,pred ,tail1 , tail2)
+		`(if ,(Pred pred) ,(Tail tail1) ,(Tail tail2))]
 	       [,triv
 		(Triv triv)])))
+    (define Pred
+      (lambda (x)
+	(match x
+	       [(if ,pred1 ,pred2 ,pred3)
+		`(if ,(Pred pred1) ,(Pred pred2) ,(Pred pred3))]
+	       [(begin ,effect* ... ,pred)
+		`(begin ,@(map Effect effect*) ,(Pred pred))]
+	       [(,relop ,triv1 ,triv2)
+		`(,relop ,(Triv triv1) ,(Triv triv2))]
+	       [(true) '(true)]
+	       [(false) '(false)])))
     (define Effect
       (lambda (x)
 	(match x
-	       [(set! ,var (,binop ,triv1 ,triv2))
-		`(set! ,(Var var) (,binop ,(Triv triv1) ,(Triv triv2)))]
-	       [(set! ,var ,triv)
-		`(set! ,(Var var) ,(Triv triv))])))
-    (define Var
+	       [(if ,pred ,effect1 ,effect2)
+		`(if ,(Pred pred) ,(Effect effect1) ,(Effect effect2))]
+	       [(begin ,effect* ... ,effect)
+		`(begin ,@(map Effect effect*) ,(Effect effect))]
+	       [(set! ,loc (,binop ,triv1 ,triv2))
+		`(set! ,(Loc loc) (,binop ,(Triv triv1) ,(Triv triv2)))]
+	       [(set! ,loc ,triv)
+		`(set! ,(Loc loc) ,(Triv triv))]
+	       [(nop) '(nop)])))
+    (define Loc
       (lambda (var)
 	(if (frame-var? var) 
 	    (make-disp-opnd 'rbp (* 8 (frame-var->index var)))
@@ -98,6 +116,101 @@
 	(if (frame-var? t)
 	    (make-disp-opnd 'rbp (* 8 (frame-var->index t)))
 	    t)))
+    (Program x)))
+
+(define expose-basic-blocks
+  (lambda (x)
+    (define local-bind '())
+    (define bind-tail
+      (lambda (label tail)
+	(set! local-bind (cons `(,label (lambda () ,tail)) local-bind))))
+    (define bind-func
+      (lambda (label tail)
+	(if (null? tail)
+	    (set! local-bind
+		  (cons `(,label (lambda () ())) local-bind))
+	    (let ([tail$ (if (null? (cdr tail))
+			     (car tail)
+			     (cons 'begin tail))])
+	      (set! local-bind (cons `(,label (lambda () ,tail$)) local-bind))))))
+    (define Program
+      (lambda (x)
+	(match x
+	       [(letrec ([,label* (lambda () ,tail*)] ...) ,tail)
+		`(letrec ,(append (map (lambda (x y)
+					 `(,x (lambda () ,(Tail y))))
+				       label* tail*) local-bind)
+		   ,(Tail tail))])))
+    (define Tail
+      (lambda (x)
+	(match x
+	       [(if ,pred ,tail1 ,tail2)
+		(let ([then-label (unique-label 'c)]
+		      [else-label (unique-label 'a)])
+		  (bind-tail then-label (Tail tail1))
+		  (bind-tail else-label (Tail tail2))
+		  (Pred pred then-label else-label))]
+	       [(begin ,effect* ... ,tail)		
+		(let ([tail-statement (Effect* effect* (Tail tail))])
+		  (if (eq? (car tail-statement) 'begin)
+		      (make-begin (cdr tail-statement))
+		      tail-statement))]
+	       [(,triv) x])))
+    (define Effect*
+      (lambda (ls tail)
+	(if (null? ls)
+	    tail
+	    (let ([ret (Effect (car ls) (cons (Effect* (cdr ls) tail) '()))])
+	      (if (null? (cdr ret))
+		  (car ret)
+		  (cons 'begin ret))))))
+    (define Pred
+      (lambda (x true-label false-label)
+	(match x
+	       [(true) (list true-label)]
+	       [(false) (list false-label)]	       
+	       [(if ,pred1 ,pred2 ,pred3)
+		(let ([then-label (unique-label 'c)]
+		      [else-label (unique-label 'a)]
+		      [then (Pred pred2 true-label false-label)]
+		      [else (Pred pred3 true-label false-label)])
+		  (bind-tail then-label then)
+		  (bind-tail else-label else)
+		  (Pred pred1 then-label else-label))]
+	       [(begin ,effect* ... ,pred)		
+		(if (null? effect*)
+		    (Pred pred true-label false-label)
+		    (let ([new-true (unique-label 'c)]
+			  [new-false (unique-label 'a)])
+		      (bind-tail new-true (Effect* effect* `(,true-label)))
+		      (bind-tail new-false (Effect* effect* `(,false-label)))
+		      (Pred pred new-true new-false)))]
+	       [(,relop ,triv1 ,triv2)
+		`(if ,x (,true-label) (,false-label))])))
+    (define Effect
+      (lambda (x after)
+	(match x
+	       [(nop) after]
+	       [(set! ,loc ,triv) (cons x after)]
+	       [(set! ,loc (,binop ,triv1 triv2))
+		(cons x after)]
+	       [(if ,pred ,effect1 ,effect2)
+		(let ([true-label (unique-label 'c)]
+		      [false-label (unique-label 'a)]
+		      [jump-label (unique-label 'j)])
+		  (if (null? after)
+		      (begin
+			(bind-func true-label (Effect effect1 '()))    
+			(bind-func false-label (Effect effect2 '())))
+		      (begin
+			(bind-func jump-label after)
+			(bind-func true-label (Effect effect1 `((,jump-label))))
+			(bind-func false-label (Effect effect2 `((,jump-label))))))
+		  (cons (Pred pred true-label false-label) '()))]
+	       [(begin ,effect* ... ,effect)
+		(if (null? effect*)
+		    (Effect effect after)
+		    (Effect (car effect*) (cddr x)))])))
     (Program x)))
 
 (define flatten-program
