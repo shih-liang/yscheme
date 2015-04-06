@@ -219,20 +219,29 @@
       (lambda (x)
 	(define make-body
 	  (lambda (label* tail*)
-	    (apply append 
-		   (map (lambda (label tail)
-			  `(,label ,@(Tail tail)))
-			label* tail*))))
+	    (if (null? label*)
+		'()
+		(append 
+		 (cons (car label*) (Tail (car tail*) (cdr label*)))
+		 (make-body (cdr label*) (cdr tail*))))))
 	(match x
 	       [(letrec ([,label* (lambda () ,tail*)] ...) ,tail)
-		`(code ,@(Tail tail) ,@(make-body label* tail*))])))
+		(cons 'code       
+		      (append 
+		       (Tail tail (car label*))
+		       (make-body label* tail*)))])))
     (define Tail
-      (lambda (x)
+      (lambda (x label)
 	(match x
+	       [(if ,pred (,label1) (,label2))
+		(cond
+		 ((eq? label label2) `((if ,pred (jump ,label1))))
+		 ((eq? label label1) `((if (not ,pred) (jump ,label2))))
+		 (#t `((if ,pred (jump ,label1)) (jump ,label2))))]
 	       [(begin ,effect* ... ,tail)
-		`(,@effect* ,(Tail tail))]
+		(append effect* (Tail tail label))]
 	       [(,triv)
-		`(jump ,triv)])))
+		`((jump ,triv))])))
     (Program x)))
 
 (define generate-x86-64
@@ -247,21 +256,39 @@
       (lambda (stmt)
 	(match stmt
 	       [(set! ,reg ,lbl) (guard (label? lbl)) (emit 'leaq lbl reg)]
-	       [(set! ,var1 (,op ,var1 ,opnd)) (emit (Binop op) opnd var1)]
+	       [(set! ,var1 (,op ,var1 ,opnd)) (emit (op->inst op) opnd var1)]
 	       [(set! ,var ,opnd) (emit 'movq opnd var)]
 	       [(jump ,opnd) (emit-jump 'jmp opnd)]
 	       [,var (guard (label? var)) (emit-label var)]
+	       [(if (,op ,x ,y) (jump ,lbl)) 
+		(begin (emit 'cmpq y x) (emit-jump (op->inst op) lbl))]
+	       [(if (not (,op ,x ,y)) (jump ,lbl)) 
+		(begin (emit 'cmpq y x) (emit-jump (inst->inst^ (op->inst op)) lbl))]
 	       )))
-    (define Binop
-      (lambda (x)
-	(match x
-	       [+ 'addq]
-	       [- 'subq]
-	       [* 'imulq]
-	       [logand 'andq]
-	       [logor 'orq]
-	       [sra 'sraq]
-	       [,other (errorf 'parse "invalid Binop ~s" other)])))
+    (define op->inst
+      (lambda (op)
+	(case op
+	  [(+) 'addq]
+	  [(-) 'subq]
+	  [(*) 'imulq]
+	  [(logand) 'andq]
+	  [(logor) 'orq]
+	  [(sra) 'sarq]
+	  [(=) 'je]
+	  [(<) 'jl]
+	  [(<=) 'jle]
+	  [(>) 'jg]
+	  [(>=) 'jge]
+	  [else (error who "unexpected binop ~s" op)])))
+    (define inst->inst^
+      (lambda (inst)
+	(case inst
+	  [(je) 'jne]
+	  [(jl) 'jge]
+	  [(jle) 'jg]
+	  [(jg) 'jle]
+	  [(jge) 'jl]
+	  )))
     (printf ".global _scheme_entry ~%")
     (printf "_scheme_entry: ~%")
     (Program x)
