@@ -455,7 +455,7 @@
 
 (define test-one
   (case-lambda
-    [(expr) ($test-one expr #t #t #f)]
+    [(expr) ($test-one expr #f #t #f)]
     [(expr emit?) ($test-one expr emit? #t #f)]
     [(expr emit? verbose?) ($test-one expr emit? verbose? #f)]))
 

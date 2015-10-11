@@ -28,6 +28,8 @@
                             ptr))))))]
         [else (error 'ptr->datum "can't handle ~s" ptr)]))))
 
+(define error-handler (lambda args args))
+
 (language-wrapper
   (lambda (pass-name x)
     (define rewrite-opnds
